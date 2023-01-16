@@ -48,9 +48,11 @@ include { INPUT_CHECK } from '../subworkflows/local/input_check'
 //
 // MODULE: Installed directly from nf-core/modules
 //
-include { FASTQC                      } from '../modules/nf-core/fastqc/main'
-include { MULTIQC                     } from '../modules/nf-core/multiqc/main'
-include { CUSTOM_DUMPSOFTWAREVERSIONS } from '../modules/nf-core/custom/dumpsoftwareversions/main'
+include { CUTADAPT                                  } from '../modules/nf-core/cutadapt/main'
+include { FASTQC; FASTQC as FASTQC_POST_TRIMMING    } from '../modules/nf-core/fastqc/main'
+include { MULTIQC as MULTIQC_PRE_TRIMMING           } from '../modules/nf-core/multiqc/main'
+include { MULTIQC as MULTIQC_POST_TRIMMING          } from '../modules/nf-core/multiqc/main'
+include { CUSTOM_DUMPSOFTWAREVERSIONS               } from '../modules/nf-core/custom/dumpsoftwareversions/main'
 
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -74,12 +76,29 @@ workflow TRIMSEQ {
     ch_versions = ch_versions.mix(INPUT_CHECK.out.versions)
 
     //
-    // MODULE: Run FastQC
+    // MODULE: Run FastQC before trimming
     //
     FASTQC (
         INPUT_CHECK.out.reads
     )
     ch_versions = ch_versions.mix(FASTQC.out.versions.first())
+
+    //
+    // MODULE: Run CUTADAPT
+    //
+    CUTADAPT (
+        INPUT_CHECK.out.reads
+    )
+    ch_versions = ch_versions.mix(CUTADAPT.out.versions.first())
+
+    //
+    // MODULE: Run FastQC after trimming
+    //
+    FASTQC_POST_TRIMMING (
+        CUTADAPT.out.reads
+    )
+    ch_versions = ch_versions.mix(FASTQC_POST_TRIMMING.out.versions.first())
+
 
     CUSTOM_DUMPSOFTWAREVERSIONS (
         ch_versions.unique().collectFile(name: 'collated_versions.yml')
@@ -98,15 +117,24 @@ workflow TRIMSEQ {
     ch_multiqc_files = ch_multiqc_files.mix(ch_workflow_summary.collectFile(name: 'workflow_summary_mqc.yaml'))
     ch_multiqc_files = ch_multiqc_files.mix(ch_methods_description.collectFile(name: 'methods_description_mqc.yaml'))
     ch_multiqc_files = ch_multiqc_files.mix(CUSTOM_DUMPSOFTWAREVERSIONS.out.mqc_yml.collect())
-    ch_multiqc_files = ch_multiqc_files.mix(FASTQC.out.zip.collect{it[1]}.ifEmpty([]))
 
-    MULTIQC (
-        ch_multiqc_files.collect(),
+    ch_multiqc_pre_trimming_files = ch_multiqc_files.mix(FASTQC.out.zip.collect{it[1]}.ifEmpty([]))
+    MULTIQC_PRE_TRIMMING (
+        ch_multiqc_pre_trimming_files.collect(),
         ch_multiqc_config.toList(),
         ch_multiqc_custom_config.toList(),
         ch_multiqc_logo.toList()
     )
-    multiqc_report = MULTIQC.out.report.toList()
+    multiqc_pre_trimming_report = MULTIQC_PRE_TRIMMING.out.report.toList()
+
+    ch_multiqc_post_trimming_files = ch_multiqc_files.mix(FASTQC_POST_TRIMMING.out.zip.collect{it[1]}.ifEmpty([]))
+    MULTIQC_POST_TRIMMING (
+        ch_multiqc_post_trimming_files.collect(),
+        ch_multiqc_config.toList(),
+        ch_multiqc_custom_config.toList(),
+        ch_multiqc_logo.toList()
+    )
+    multiqc_post_trimming_report = MULTIQC_POST_TRIMMING.out.report.toList()
 }
 
 /*
